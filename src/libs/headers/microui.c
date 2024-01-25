@@ -851,11 +851,9 @@ static double mu_get_timediff(struct timeval start) {
 
 #endif
 
-
 void mu_input_mousemove(mu_Context *ctx, int x, int y) {
   ctx->mouse_pos = mu_vec2(x, y);
 }
-
 
 void mu_input_mousedown(mu_Context *ctx, int x, int y, int btn) {
   mu_input_mousemove(ctx, x, y);
@@ -875,18 +873,15 @@ void mu_input_mouseup(mu_Context *ctx, int x, int y, int btn) {
   ctx->mouse_up |= btn;
 }
 
-
 void mu_input_scroll(mu_Context *ctx, int x, int y) {
   ctx->scroll_delta.x += x;
   ctx->scroll_delta.y += y;
 }
 
-
 void mu_input_keydown(mu_Context *ctx, int key) {
   ctx->key_pressed |= key;
   ctx->key_down |= key;
 }
-
 
 void mu_input_keyup(mu_Context *ctx, int key) {
   ctx->key_down &= ~key;
@@ -1627,13 +1622,13 @@ int mu_button_ex_with_shadow(mu_Context *ctx, const char *label, int icon, int o
 
   /* draw */
   if (~opt & MU_OPT_BURIED || (ctx->hover == id || ctx->focus == id)) {
-#ifdef USE_SHAPES_FOR_BUTTONS
     int colorid = MU_COLOR_BUTTON;
     colorid += (ctx->focus == id) ? 2 : (ctx->hover == id ? 1 : 0);
+#ifdef USE_SHAPES_FOR_BUTTONS
     float params[4] = {0,0,0,0};
     mu_draw_shape(ctx, MU_SHAPE_RECT, r, ctx->style->colors[colorid], 1, params);
 #else
-    mu_draw_control_frame(ctx, id, r, MU_COLOR_BUTTON, opt);
+    mu_draw_control_frame(ctx, id, r, colorid, opt);
 #endif
   }
 

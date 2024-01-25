@@ -11915,8 +11915,7 @@ _SOKOL_PRIVATE void _sapp_x11_process_event(XEvent* event) {
             }
             break;
         case SelectionNotify:
-            printf("SelectionNotify!\n");
-
+            // printf("SelectionNotify!\n");
             if (event->xselection.property == _sapp.x11.xdnd.XdndSelection) {
                 char* data = 0;
                 uint32_t result = _sapp_x11_get_window_property(event->xselection.requestor,

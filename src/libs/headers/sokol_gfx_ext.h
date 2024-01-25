@@ -41,9 +41,27 @@ SOKOL_GFX_API_DECL void sg_update_texture_filter(sg_image img_id, sg_filter min_
 #error "Please include sokol_gfx.h implementation before sokol_gp.h implementation"
 #endif
 
-#include <SDL2/SDL.h>
+// #include <SDL2/SDL.h>
 
 #if defined(_SOKOL_ANY_GL)
+
+static void _sg_gl_read_image_pixels(_sg_image_t* img, void* pixels, int width, int height, int x, int y) {
+    SOKOL_ASSERT(img->gl.target == GL_TEXTURE_2D);
+    SOKOL_ASSERT(0 != img->gl.tex[img->cmn.active_slot]);
+
+    static GLuint newFbo = 0;
+    GLuint oldFbo = 0;
+    if(newFbo == 0) {
+        glGenFramebuffers(1, &newFbo);
+    }
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint*)&oldFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, newFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, img->gl.tex[img->cmn.active_slot], 0);
+    glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glBindFramebuffer(GL_FRAMEBUFFER, oldFbo);
+    if (newFbo == 0) glDeleteFramebuffers(1, &newFbo);
+    _SG_GL_CHECK_ERROR();
+}
 
 static void _sg_gl_query_image_pixels(_sg_image_t* img, void* pixels) {
     SOKOL_ASSERT(img->gl.target == GL_TEXTURE_2D);
@@ -55,18 +73,7 @@ static void _sg_gl_query_image_pixels(_sg_image_t* img, void* pixels) {
     _SG_GL_CHECK_ERROR();
     _sg_gl_cache_restore_texture_binding(0);
 #else
-    static GLuint newFbo = 0;
-    GLuint oldFbo = 0;
-    if(newFbo == 0) {
-        glGenFramebuffers(1, &newFbo);
-    }
-    glGetIntegerv(GL_FRAMEBUFFER_BINDING, (GLint*)&oldFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, newFbo);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, img->gl.tex[img->cmn.active_slot], 0);
-    glReadPixels(0, 0, img->cmn.width, img->cmn.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    glBindFramebuffer(GL_FRAMEBUFFER, oldFbo);
-    //glDeleteFramebuffers(1, &newFbo);
-    _SG_GL_CHECK_ERROR();
+    _sg_gl_read_image_pixels(img, pixels, img->cmn.width, img->cmn.height, 0, 0);
 #endif
 }
 
@@ -155,7 +162,7 @@ static uint32_t _sg_d3d11_dxgi_format_to_sdl_pixel_format(DXGI_FORMAT dxgi_forma
     }
 }
 
-static void _sg_d3d11_query_image_pixels(_sg_image_t* img, void* pixels) {
+static void _sg_d3d11_query_image_pixels(_sg_image_t* img, void* pixels, int w, int h, int x, int y) {
     SOKOL_ASSERT(_sg.d3d11.ctx);
     SOKOL_ASSERT(img->d3d11.tex2d);
     HRESULT hr;
@@ -164,8 +171,8 @@ static void _sg_d3d11_query_image_pixels(_sg_image_t* img, void* pixels) {
     // create staging texture
     ID3D11Texture2D* staging_tex = NULL;
     D3D11_TEXTURE2D_DESC staging_desc = {
-        .Width = (UINT)img->cmn.width,
-        .Height = (UINT)img->cmn.height,
+        .Width = (UINT)w,
+        .Height = (UINT)h,
         .MipLevels = 1,
         .ArraySize = 1,
         .Format = img->d3d11.format,
@@ -184,7 +191,7 @@ static void _sg_d3d11_query_image_pixels(_sg_image_t* img, void* pixels) {
     // copy pixels to staging texture
     _sgext_d3d11_CopySubresourceRegion(_sg.d3d11.ctx,
         (ID3D11Resource*)staging_tex,
-        0, 0, 0, 0,
+        x, y, 0, 0,
         (ID3D11Resource*)img->d3d11.tex2d,
         0, NULL);
 
@@ -354,9 +361,10 @@ static void _sg_metal_encode_texture_pixels(int x, int y, int w, int h, bool ori
     _SOKOL_UNUSED(res);
 }
 
-static void _sg_metal_query_image_pixels(_sg_image_t* img, void* pixels) {
+static void _sg_metal_query_image_pixels(_sg_image_t* img, void* pixels, int w, int h, int x, int y) {
     id<MTLTexture> mtl_src_texture = _sg.mtl.idpool.pool[img->mtl.tex[0]];
-    _sg_metal_encode_texture_pixels(0, 0, mtl_src_texture.width, mtl_src_texture.height, true, mtl_src_texture, pixels);
+    // _sg_metal_encode_texture_pixels(0, 0, mtl_src_texture.width, mtl_src_texture.height, true, mtl_src_texture, pixels);
+    _sg_metal_encode_texture_pixels(x, y, w, h, true, mtl_src_texture, pixels);
 }
 
 static void _sg_metal_query_pixels(int x, int y, int w, int h, bool origin_top_left, void *pixels) {
@@ -392,9 +400,25 @@ void sg_query_image_pixels(sg_image img_id, void* pixels, int size) {
 #if defined(_SOKOL_ANY_GL)
     _sg_gl_query_image_pixels(img, pixels);
 #elif defined(SOKOL_D3D11)
-    _sg_d3d11_query_image_pixels(img, pixels);
+    _sg_d3d11_query_image_pixels(img, pixels, img->cmn.width, img->cmn.height, 0, 0);
 #elif defined(SOKOL_METAL)
-    _sg_metal_query_image_pixels(img, pixels);
+    _sg_metal_query_image_pixels(img, pixels, img->cmn.width, img->cmn.height, 0, 0);
+#endif
+}
+
+void sg_query_subimage_pixels(sg_image img_id, void* pixels, int size, int w, int h, int x, int y) {
+    SOKOL_ASSERT(pixels);
+    SOKOL_ASSERT(img_id.id != SG_INVALID_ID);
+    _sg_image_t* img = _sg_lookup_image(&_sg.pools, img_id.id);
+    SOKOL_ASSERT(img);
+    SOKOL_ASSERT(size >= (w * h * 4));
+    _SOKOL_UNUSED(size);
+#if defined(_SOKOL_ANY_GL)
+    _sg_gl_read_image_pixels(img, pixels, w, h, x, y);
+#elif defined(SOKOL_D3D11)
+    _sg_d3d11_query_image_pixels(img, pixels, w, h, x, y);
+#elif defined(SOKOL_METAL)
+    _sg_metal_query_image_pixels(img, pixels, w, h, x, y);
 #endif
 }
 
