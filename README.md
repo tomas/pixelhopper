@@ -12,7 +12,8 @@ None that aren't included in the package. Pixelhopper is built on the shoulders 
  - microui - MIT
  - chan (Go channels in C) - Apache 2
  - wuffs - Apache 2
- - stb_image_write - Public Domain or MIT
+ - stb_image_write/resize - Public Domain or MIT
+ - msf_gif - Public Domain or MIT
  - nelua-lang (MIT)
 
 # Installation (Linux)
