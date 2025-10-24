@@ -1657,6 +1657,8 @@ SOKOL_APP_API_DECL const char* sapp_get_dropped_file_path(int index);
 /* special run-function for SOKOL_NO_ENTRY (in standard mode this is an empty stub) */
 SOKOL_APP_API_DECL void sapp_run(const sapp_desc* desc);
 
+#ifdef __linux__
+#include <X11/Xlib.h>
 #include <EGL/egl.h>
 
 SOKOL_APP_API_DECL Display* sapp_x11_get_display(void);
@@ -1665,6 +1667,8 @@ SOKOL_APP_API_DECL Display* sapp_x11_get_display(void);
 SOKOL_APP_API_DECL const void* sapp_egl_get_display(void);
 /* EGL: get EGLContext object */
 SOKOL_APP_API_DECL EGLContext* sapp_egl_get_context(void);
+
+#endif
 
 /* GL: return true when GLES2 fallback is active (to detect fallback from GLES3) */
 SOKOL_APP_API_DECL bool sapp_gles2(void);
