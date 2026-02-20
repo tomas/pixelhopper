@@ -3075,7 +3075,8 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
     #endif
 
     // optional GL loader definitions (only on Win32)
-    #if defined(_SOKOL_USE_WIN32_GL_LOADER)
+    #if defined(_SOKOL_USE_WIN32_GL_LOADER) || defined(PORTABLEGL_IMPLEMENTATION)
+
         #define __gl_h_ 1
         #define __gl32_h_ 1
         #define __gl31_h_ 1
@@ -3086,13 +3087,16 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
         #define __glcorearb_h_ 1
         #define __gl_glcorearb_h_ 1
         #define GL_APIENTRY APIENTRY
-
-        typedef unsigned int  GLenum;
+        #if !defined(PORTABLEGL_IMPLEMENTATION)
+            typedef unsigned int  GLenum;
+        #endif
         typedef unsigned int  GLuint;
         typedef int  GLsizei;
         typedef char  GLchar;
         typedef ptrdiff_t  GLintptr;
-        typedef ptrdiff_t  GLsizeiptr;
+        #if !defined(PORTABLEGL_IMPLEMENTATION)
+            typedef ptrdiff_t  GLsizeiptr;
+        #endif
         typedef double  GLclampd;
         typedef unsigned short  GLushort;
         typedef unsigned char  GLubyte;
@@ -3101,7 +3105,9 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
         typedef double  GLdouble;
         typedef unsigned short  GLhalf;
         typedef float  GLclampf;
-        typedef unsigned int  GLbitfield;
+        #if !defined(PORTABLEGL_IMPLEMENTATION)
+            typedef unsigned int  GLbitfield;
+        #endif
         typedef signed char  GLbyte;
         typedef short  GLshort;
         typedef void  GLvoid;

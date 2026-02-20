@@ -1510,7 +1510,9 @@ typedef struct sapp_desc {
     bool borderless;
     bool fixed;
     bool start_hidden;
+    bool fixed_aspect_ratio;
     sapp_logger logger;                 // optional log callback overrides (default: SAPP_LOG(message))
+    int exit_code;
 
     /* backend-specific options */
     bool wait_for_events;
@@ -1627,7 +1629,7 @@ SOKOL_APP_API_DECL void sapp_cancel_quit(void);
 /* initiate a "hard quit" (quit application without sending SAPP_EVENTTYPE_QUIT_REQUSTED) */
 SOKOL_APP_API_DECL void sapp_quit(void);
 /* this causes the app to block until input is received. the flag will be cleared after that, so you will have to call it again if necessary. */
-SOKOL_APP_API_DECL void sapp_wait_for_event(void);
+SOKOL_APP_API_DECL void sapp_wait_for_event(bool value);
 /* call from inside event callback to consume the current event (don't forward to platform) */
 SOKOL_APP_API_DECL void sapp_consume_event(void);
 /* get the current frame counter (for comparison with sapp_event.frame_count) */
@@ -1655,11 +1657,11 @@ SOKOL_APP_API_DECL int sapp_get_num_dropped_files(void);
 SOKOL_APP_API_DECL const char* sapp_get_dropped_file_path(int index);
 
 /* special run-function for SOKOL_NO_ENTRY (in standard mode this is an empty stub) */
-SOKOL_APP_API_DECL void sapp_run(const sapp_desc* desc);
+SOKOL_APP_API_DECL int sapp_run(const sapp_desc* desc);
 
-#ifdef __linux__
-#include <X11/Xlib.h>
+#ifdef SOKOL_FORCE_EGL
 #include <EGL/egl.h>
+#include <X11/Xlib.h>
 
 SOKOL_APP_API_DECL Display* sapp_x11_get_display(void);
 
@@ -1720,7 +1722,7 @@ SOKOL_APP_API_DECL const void* sapp_android_get_native_activity(void);
 } /* extern "C" */
 
 /* reference-based equivalents for C++ */
-inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
+inline int sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
 
 #endif
 
@@ -1980,6 +1982,7 @@ inline void sapp_run(const sapp_desc& desc) { return sapp_run(&desc); }
     #include <EGL/egl.h>
 #elif defined(_SAPP_LINUX)
     #define GL_GLEXT_PROTOTYPES
+    #include <sys/select.h>
     #include <X11/Xlib.h>
     #include <X11/Xutil.h>
     #include <X11/XKBlib.h>
@@ -3471,7 +3474,7 @@ _SOKOL_PRIVATE void _sapp_macos_run(const sapp_desc* desc) {
 int main(int argc, char* argv[]) {
     sapp_desc desc = sokol_main(argc, argv);
     _sapp_macos_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_NO_ENTRY */
 
@@ -4365,7 +4368,7 @@ _SOKOL_PRIVATE void _sapp_ios_run(const sapp_desc* desc) {
 int main(int argc, char* argv[]) {
     sapp_desc desc = sokol_main(argc, argv);
     _sapp_ios_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_NO_ENTRY */
 
@@ -4886,7 +4889,7 @@ EM_JS(uint32_t, sapp_js_dropped_file_size, (int index), {
     \x2F\x2A\x2A @suppress {missingProperties} \x2A\x2F
     const files = Module.sokol_dropped_files;
     if ((index < 0) || (index >= files.length)) {
-        return 0;
+        return desc.exit_code || 0;
     }
     else {
         return files[index].size;
@@ -5904,7 +5907,7 @@ _SOKOL_PRIVATE void _sapp_emsc_run(const sapp_desc* desc) {
 int main(int argc, char* argv[]) {
     sapp_desc desc = sokol_main(argc, argv);
     _sapp_emsc_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_NO_ENTRY */
 #endif /* _SAPP_EMSCRIPTEN */
@@ -7842,7 +7845,7 @@ _SOKOL_PRIVATE char** _sapp_win32_command_line_to_utf8_argv(LPWSTR w_command_lin
 int main(int argc, char* argv[]) {
     sapp_desc desc = sokol_main(argc, argv);
     _sapp_win32_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #else
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
@@ -7855,7 +7858,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     sapp_desc desc = sokol_main(argc_utf8, argv_utf8);
     _sapp_win32_run(&desc);
     _sapp_free(argv_utf8);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_WIN32_FORCE_MAIN */
 #endif /* SOKOL_NO_ENTRY */
@@ -8889,7 +8892,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     _SOKOL_UNUSED(nCmdShow);
     sapp_desc desc = sokol_main(0, nullptr);
     _sapp_uwp_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_NO_ENTRY */
 #endif /* _SAPP_UWP */
@@ -10722,14 +10725,25 @@ _SOKOL_PRIVATE void _sapp_glx_create_context(void) {
         _sapp_fail("GLX: ARB_create_context and ARB_create_context_profile required");
     }
     _sapp_x11_grab_error_handler();
+
     const int attribs[] = {
         GLX_CONTEXT_MAJOR_VERSION_ARB, _sapp.desc.gl_major_version,
         GLX_CONTEXT_MINOR_VERSION_ARB, _sapp.desc.gl_minor_version,
-        GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
-        GLX_CONTEXT_FLAGS_ARB, GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
+        // GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+        // GLX_CONTEXT_FLAGS_ARB, GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
         0, 0
     };
+
     _sapp.glx.ctx = _sapp.glx.CreateContextAttribsARB(_sapp.x11.display, native, NULL, True, attribs);
+    XSync(_sapp.x11.display, False);
+
+    // if (!_sapp.glx.ctx) {
+    //     attribs[1] = 1; attribs[3] = 0;
+    //     fprintf(stdout, "[X11] Failed to create OpenGL 3.0 context\n");
+    //     fprintf(stdout, "[X11] ... using old-style GLX context!\n");
+    //     _sapp.glx.ctx =  _sapp.glx.CreateContextAttribsARB(_sapp.x11.display, native, 0, True, attribs);
+    // }
+
     if (!_sapp.glx.ctx) {
         _sapp_fail("GLX: failed to create GL context");
     }
@@ -11105,6 +11119,12 @@ _SOKOL_PRIVATE void _sapp_x11_create_window(Visual* visual, int depth) {
         hints->flags |= (PMinSize | PMaxSize);
         hints->min_width  = hints->max_width  = window_width;
         hints->min_height = hints->max_height = window_height;
+    }
+
+    if (_sapp.desc.fixed_aspect_ratio) {
+        hints->flags |= PAspect;
+        hints->max_aspect.x = hints->min_aspect.x = window_width;
+        hints->max_aspect.y = hints->min_aspect.y = window_height;
     }
 
     XSetWMNormalHints(_sapp.x11.display, _sapp.x11.window, hints);
@@ -12243,6 +12263,8 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
 #endif
     sapp_set_icon(&desc->icon);
     _sapp.valid = true;
+    _sapp.wait_for_event = desc->wait_for_events;
+
     if (!desc->start_hidden)  {
         _sapp_x11_show_window();
     }
@@ -12254,7 +12276,7 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
     while (!_sapp.quit_ordered) {
         _sapp_timing_measure(&_sapp.timing);
 
-        while ((_sapp.wait_for_event || desc->wait_for_events) && !XPending(_sapp.x11.display)) {
+        while (_sapp.wait_for_event && !XPending(_sapp.x11.display)) {
             _sapp_x11_wait_for_event();
         }
 
@@ -12264,7 +12286,7 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
             XNextEvent(_sapp.x11.display, &event);
             _sapp_x11_process_event(&event);
         }
-        _sapp.wait_for_event = false;
+        _sapp.wait_for_event = desc->wait_for_events;
         _sapp_frame();
 #if defined(_SAPP_GLX)
         _sapp_glx_swap_buffers();
@@ -12298,14 +12320,14 @@ _SOKOL_PRIVATE void _sapp_linux_run(const sapp_desc* desc) {
 int main(int argc, char* argv[]) {
     sapp_desc desc = sokol_main(argc, argv);
     _sapp_linux_run(&desc);
-    return 0;
+    return desc.exit_code || 0;
 }
 #endif /* SOKOL_NO_ENTRY */
 #endif /* _SAPP_LINUX */
 
 /*== PUBLIC API FUNCTIONS ====================================================*/
 #if defined(SOKOL_NO_ENTRY)
-SOKOL_API_IMPL void sapp_run(const sapp_desc* desc) {
+SOKOL_API_IMPL int sapp_run(const sapp_desc* desc) {
     SOKOL_ASSERT(desc);
     #if defined(_SAPP_MACOS)
         _sapp_macos_run(desc);
@@ -12323,6 +12345,8 @@ SOKOL_API_IMPL void sapp_run(const sapp_desc* desc) {
         // calling sapp_run() directly is not supported on Android)
         _sapp_fail("sapp_run() not supported on this platform!");
     #endif
+
+    return desc->exit_code;
 }
 
 /* this is just a stub so the linker doesn't complain */
@@ -12430,6 +12454,8 @@ SOKOL_APP_IMPL const void* sapp_egl_get_display(void) {
     #endif
 }
 
+#ifdef SOKOL_FORCE_EGL
+
 SOKOL_APP_IMPL EGLContext* sapp_egl_get_context(void) {
     SOKOL_ASSERT(_sapp.valid);
     #if defined(_SAPP_ANDROID)
@@ -12440,6 +12466,8 @@ SOKOL_APP_IMPL EGLContext* sapp_egl_get_context(void) {
         return 0;
     #endif
 }
+
+#endif
 
 SOKOL_API_IMPL bool sapp_gles2(void) {
     return _sapp.gles2_fallback;
@@ -12551,8 +12579,8 @@ SOKOL_API_IMPL void sapp_quit(void) {
     _sapp.quit_ordered = true;
 }
 
-SOKOL_API_IMPL void sapp_wait_for_event(void) {
-    _sapp.wait_for_event = true;
+SOKOL_API_IMPL void sapp_wait_for_event(bool value) {
+    _sapp.wait_for_event = value;
 }
 
 SOKOL_API_IMPL void sapp_consume_event(void) {
@@ -12665,6 +12693,16 @@ SOKOL_API_IMPL void sapp_set_window_size(int width, int height) {
             XSetWMNormalHints(_sapp.x11.display, _sapp.x11.window, hints);
             XFree(hints);
         }
+
+        if (_sapp.desc.fixed_aspect_ratio) {
+            XSizeHints* hints = XAllocSizeHints();
+            hints->flags |= PAspect;
+            hints->max_aspect.x = hints->min_aspect.x = width;
+            hints->max_aspect.y = hints->min_aspect.y = height;
+            XSetWMNormalHints(_sapp.x11.display, _sapp.x11.window, hints);
+            XFree(hints);
+        }
+
         XResizeWindow(_sapp.x11.display, _sapp.x11.window, width, height);
         XFlush(_sapp.x11.display);
     #endif

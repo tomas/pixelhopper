@@ -142,6 +142,7 @@ enum {
   MU_OPT_NOPADDING    = (1 << 18),
   MU_OPT_PREVENT_SCROLL = (1 << 19),
   MU_OPT_HIDE_ON_CLICK  = (1 << 20), // for popups
+  MU_OPT_CONTAINHEIGHT  = (1 << 21), // for images
 };
 
 enum {
@@ -191,7 +192,7 @@ typedef struct { int type, size; } mu_BaseCommand;
 typedef struct { mu_BaseCommand base; void *dst; } mu_JumpCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; } mu_ClipCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; mu_Color color; } mu_RectCommand;
-typedef struct { mu_BaseCommand base; unsigned char shape; mu_Rect rect; mu_Color color; float scale; float params[4]; } mu_ShapeCommand;
+typedef struct { mu_BaseCommand base; unsigned char shape; mu_Rect rect; mu_Color color; float scale; float params[9]; } mu_ShapeCommand;
 typedef struct { mu_BaseCommand base; mu_Font font; mu_Vec2 pos; mu_Color color; float scale; char str[1]; } mu_TextCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; int id; mu_Color color; float scale; } mu_IconCommand;
 typedef struct { mu_BaseCommand base; mu_Rect dest; mu_Image img; float opacity; float scale; } mu_ImageCommand;
@@ -262,6 +263,7 @@ struct mu_Context {
   int last_zindex;
   int updated_focus;
   int frame;
+  int needs_redraw;
   mu_Container *hover_root;
   mu_Container *next_hover_root;
   mu_Container *scroll_target;
@@ -434,7 +436,7 @@ int mu_add_tab(mu_Context *ctx, const char *label, int opt, int expanded);
     (stk).idx--;           \
   } while (0)
 
-static mu_Id active_popup_id;
+// static mu_Id active_popup_id = 0;
 static int context_menu_x = 0;
 static int context_menu_y = 0;
 
@@ -582,6 +584,7 @@ void mu_begin(mu_Context *ctx) {
   ctx->mouse_delta.x = ctx->mouse_pos.x - ctx->last_mouse_pos.x;
   ctx->mouse_delta.y = ctx->mouse_pos.y - ctx->last_mouse_pos.y;
   ctx->frame++;
+  ctx->needs_redraw = 0;
   ctx->copy_text[0] = '\0';
 }
 
@@ -754,13 +757,16 @@ mu_Container* mu_get_current_container(mu_Context *ctx) {
 static mu_Container* get_container(mu_Context *ctx, mu_Id id, int opt) {
   mu_Container *cnt;
   /* try to get existing container from pool */
+
   int idx = mu_pool_get(ctx, ctx->container_pool, MU_CONTAINERPOOL_SIZE, id);
   if (idx >= 0) {
     if (ctx->containers[idx].open || ~opt & MU_OPT_CLOSED) {
       mu_pool_update(ctx, ctx->container_pool, idx);
     }
+
     return &ctx->containers[idx];
   }
+
   if (opt & MU_OPT_CLOSED) { return NULL; }
   /* container not found in pool: init new container */
   idx = mu_pool_init(ctx, ctx->container_pool, MU_CONTAINERPOOL_SIZE, id);
@@ -1169,6 +1175,13 @@ void mu_draw_shape(mu_Context *ctx, unsigned char shape, mu_Rect rect, mu_Color 
   cmd->shape.params[1] = params[1];
   cmd->shape.params[2] = params[2];
   cmd->shape.params[3] = params[3];
+  cmd->shape.params[4] = params[4];
+  cmd->shape.params[5] = params[5];
+  cmd->shape.params[6] = params[6];
+  cmd->shape.params[7] = params[7];
+  cmd->shape.params[8] = params[8];
+  cmd->shape.params[9] = params[9];
+
   /* reset clipping if it was set */
   if (clipped) { mu_set_clip(ctx, unclipped_rect); }
 }
@@ -1312,12 +1325,14 @@ void mu_draw_image(mu_Context* ctx, mu_Image image, float opacity, float scale, 
   mu_Layout *layout = get_layout(ctx);
   mu_Container *cnt = mu_get_current_container(ctx);
 
-  // int max_height = (cnt->body.h - layout->position.y) - ctx->style->spacing;
-  // if (max_height < rect.h) {
-  //   float scaleH = (max_height/(float)rect.h);
-  //   rect.h = max_height;
-  //   rect.w *= scaleH;
-  // }
+  if (flags & MU_OPT_CONTAINHEIGHT) {
+    int max_height = (cnt->body.h - layout->position.y) - ctx->style->spacing;
+    if (max_height < rect.h) {
+      float scaleH = (max_height/(float)rect.h);
+      rect.h = max_height;
+      rect.w *= scaleH;
+    }
+  }
 
   if (flags & MU_OPT_ALIGNCENTER) {
     // position at center of container
@@ -1625,8 +1640,20 @@ int mu_button_ex_with_shadow(mu_Context *ctx, const char *label, int icon, int o
     int colorid = MU_COLOR_BUTTON;
     colorid += (ctx->focus == id) ? 2 : (ctx->hover == id ? 1 : 0);
 #ifdef USE_SHAPES_FOR_BUTTONS
-    float params[4] = {0,0,0,0};
-    mu_draw_shape(ctx, MU_SHAPE_RECT, r, ctx->style->colors[colorid], 1, params);
+    // border_radius_top
+    // border_radius_bottom
+    // shadow_opacity
+    // shadow_offset_x
+    // shadow_offset_y
+    // shadow_blur
+    // shadow_spread
+    // bg_blur_amount
+    // border_opacity
+
+    float params[9] = {4, 4, 0.3, 0, 4, 4, -4, 0, 0};
+    // we need to expand rect by 1 px, to match mu_draw_control_frame's behaviour
+    // that calls mu_draw_rect and then mu_draw_box_outer
+    mu_draw_shape(ctx, MU_SHAPE_RECT, expand_rect(r, 1), ctx->style->colors[colorid], 1, params);
 #else
     mu_draw_control_frame(ctx, id, r, colorid, opt);
 #endif
@@ -2202,6 +2229,11 @@ int mu_slider_ex(mu_Context *ctx, mu_Real *value, mu_Real low, mu_Real high,
   mu_Id id = mu_get_id(ctx, &value, sizeof(value));
   mu_Rect base = mu_layout_next(ctx);
 
+  base.y += ctx->style->padding/2;
+  base.h -= ctx->style->padding/2;
+
+  // base.w -= ctx->style->padding/2;
+
   /* handle text input mode */
   if (number_textbox(ctx, &v, base, id)) { return res; }
 
@@ -2228,11 +2260,13 @@ int mu_slider_ex(mu_Context *ctx, mu_Real *value, mu_Real low, mu_Real high,
 
   /* draw base */
   mu_draw_control_frame(ctx, id, base, MU_COLOR_BASE, opt);
+
   /* draw thumb */
   w = ctx->style->thumb_size;
   x = (v - low) * (base.w - w) / (high - low);
   thumb = mu_rect(base.x + x, base.y, w, base.h);
   mu_draw_control_frame(ctx, id, thumb, MU_COLOR_HANDLE, opt);
+
   /* draw text  */
   sprintf(buf, fmt, v);
   mu_draw_control_text(ctx, buf, base, MU_COLOR_TEXT, opt, 0, 0);
@@ -2303,11 +2337,14 @@ static int header(mu_Context *ctx, const char *label, int istreenode, int opt) {
   } else {
     mu_draw_control_frame(ctx, id, r, MU_COLOR_BUTTON, 0);
   }
+
   mu_draw_icon(
     ctx, expanded ? MU_ICON_EXPANDED : MU_ICON_COLLAPSED,
     mu_rect(r.x, r.y, r.h, r.h), ctx->style->colors[MU_COLOR_TEXT]);
+
   r.x += r.h - ctx->style->padding;
   r.w -= r.h - ctx->style->padding;
+
   mu_draw_control_text(ctx, label, r, MU_COLOR_TEXT, 0, 0, opt & MU_OPT_RAISED && ctx->focus != id ? -1 : 0);
 
   return expanded ? MU_RES_ACTIVE : 0;
@@ -2504,14 +2541,16 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
     if (~opt & MU_OPT_NOTITLE) {
       mu_Id title_id = mu_get_id(ctx, "!title", 6);
       mu_update_control(ctx, title_id, tr, opt);
-      // tr.x += ctx->style->padding + 1;
+      tr.x += ctx->style->padding + 1;
       // tr.w -= ctx->style->padding;
       mu_draw_control_text(ctx, title, tr, MU_COLOR_TITLETEXT, opt, 0, 0);
       if (title_id == ctx->focus && ctx->mouse_down == MU_MOUSE_LEFT && ~opt & MU_OPT_NODRAG) {
         cnt->rect.x += ctx->mouse_delta.x;
         cnt->rect.y += ctx->mouse_delta.y;
       }
-      body.y += tr.h;
+
+      tr.x -= ctx->style->padding - 1;
+      body.y += tr.h; // + ctx->style->padding;
       body.h -= tr.h;
     }
 
@@ -2559,20 +2598,18 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
     if (ctx->mouse_pressed && ctx->hover_root != cnt) {
       // printf("clicked elsewhere\n");
       cnt->open = 0;
-      active_popup_id = 0;
+      // active_popup_id = 0;
     } else if (ctx->mouse_up && cnt->open++ > 1 && (opt & MU_OPT_HIDE_ON_CLICK)) {
       // printf("hiding popup, mouse up and cnt->open is %d\n", cnt->open);
       cnt->open = 0;
-      active_popup_id = 0;
+      // active_popup_id = 0;
     // close popup if opened with mouse click and release took longer than X ms
-    } else if (ctx->mouse_up == MU_MOUSE_RIGHT && active_popup_id && mu_get_timediff(ctx->mouse_down_ts) > 0.2) {
+    } else if (ctx->mouse_up == MU_MOUSE_RIGHT && mu_get_timediff(ctx->mouse_down_ts) > 0.2) {
       // printf("closing, last mousedown was at %f\n", mu_get_timediff(ctx->mouse_down_ts));
       cnt->open = 0;
-      active_popup_id = 0;
-    } else {
-      // printf("setting active popup to %d\n", id);
-      active_popup_id = id; // window_id
+      // active_popup_id = 0;
     }
+    if (!cnt->open) ctx->needs_redraw = 1;
   }
 
   mu_push_clip_rect(ctx, cnt->body);
@@ -2602,6 +2639,13 @@ void mu_open_popup(mu_Context *ctx, const char *name) {
 void mu_close_popup(mu_Context *ctx, const char *name) {
   mu_Container *cnt = mu_get_container(ctx, name);
   cnt->open = 0;
+
+  // if (active_popup_id != 0) {
+  //   mu_Id id = mu_get_id(ctx, name, strlen(name));
+  //   if (active_popup_id == id) {
+  //     active_popup_id = 0;
+  //   }
+  // }
 }
 
 int mu_begin_popup(mu_Context *ctx, const char *name, int opt) {
@@ -2619,41 +2663,48 @@ void mu_end_popup(mu_Context *ctx) {
 }
 
 int mu_is_popup_open(mu_Context * ctx, const char *name) {
-  // mu_Container *cnt = mu_get_container(ctx, name);
-  // printf("cnt->open: %d\n", cnt->open);
-  // return cnt->open; //  > 0 ? 1 : 0;
+  mu_Container *cnt = mu_get_container(ctx, name);
+  return cnt->open && cnt->rect.w > 0; // > 0 ? 1 : 0;
 
-  return active_popup_id != 0 && active_popup_id == mu_get_id(ctx, name, strlen(name)) ? 1 : 0;
+  // mu_Id id = mu_get_id(ctx, name, strlen(name));
+  // return active_popup_id != 0 && active_popup_id == id ? 1 : 0;
 }
 
 int mu_begin_context_menu(mu_Context * ctx, const char *name, int window_w, int window_h) {
+
+  if (context_menu_x != 0) {
+    mu_Container * cnt = mu_get_container(ctx, name);
+
+    // resize rect to detected content size if still not updated (just clicked)
+    if (cnt->rect.w == ctx->style->padding * 2 && cnt->rect.h == ctx->style->padding * 2) {
+      cnt->rect.w += cnt->content_size.x;
+      cnt->rect.h += cnt->content_size.y;
+    }
+
+    int distance_to_right = window_w - context_menu_x;
+    int distance_to_bottom = window_h - context_menu_y;
+
+    if (distance_to_right < cnt->rect.w) {
+      // cnt->rect.x = window_w - cnt->rect.w; // this seems to be the most common behaviour
+      cnt->rect.x = context_menu_x - cnt->rect.w; // but this seems nicer
+    }
+
+    if (distance_to_bottom < cnt->rect.h) {
+      cnt->rect.y = context_menu_y - cnt->rect.h;
+    }
+  }
+
   int res = mu_begin_popup(ctx, name, MU_OPT_HIDE_ON_CLICK);
 
   if (res == 0) {
     context_menu_x = 0;
     context_menu_y = 0;
-    return res;
-  }
-
-  mu_Container *cnt = mu_get_current_container(ctx);
-
-  if (context_menu_x == 0) {
+  } else if (context_menu_x == 0) {
+    mu_Container *cnt = mu_get_current_container(ctx);
     // store the original x/y position where the menu was opened, because if we modify it
     // then we'll end up modifying the modified value in the next frame
     context_menu_x = cnt->rect.x;
     context_menu_y = cnt->rect.y;
-  }
-
-  int distance_to_right = window_w - context_menu_x;
-  int distance_to_bottom = window_h - context_menu_y;
-
-  if (distance_to_right < cnt->rect.w) {
-    // cnt->rect.x = window_w - cnt->rect.w; // this seems to be the most common behaviour
-    cnt->rect.x = context_menu_x - cnt->rect.w; // but this seems nicer
-  }
-
-  if (distance_to_bottom < cnt->rect.h) {
-    cnt->rect.y = context_menu_y - cnt->rect.h;
   }
 
   return res;
