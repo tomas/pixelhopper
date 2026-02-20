@@ -1,4 +1,4 @@
-OUT=pixelhopper
+OUT=ph
 SRC=src/pixelhopper.c
 CFLAGS+=-x none -fwrapv -fno-strict-aliasing
 LDFLAGS+=-s -pthread -lX11 -lXi -lXcursor -ldl -lGL -lm
