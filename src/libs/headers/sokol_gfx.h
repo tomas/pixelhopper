@@ -2788,6 +2788,7 @@ SOKOL_GFX_API_DECL sg_resource_state sg_query_pass_state(sg_pass pass);
 /* get runtime information about a resource */
 SOKOL_GFX_API_DECL sg_buffer_info sg_query_buffer_info(sg_buffer buf);
 SOKOL_GFX_API_DECL sg_image_info sg_query_image_info(sg_image img);
+SOKOL_API_IMPL void sg_generate_mips(sg_image img_id);
 SOKOL_GFX_API_DECL sg_shader_info sg_query_shader_info(sg_shader shd);
 SOKOL_GFX_API_DECL sg_pipeline_info sg_query_pipeline_info(sg_pipeline pip);
 SOKOL_GFX_API_DECL sg_pass_info sg_query_pass_info(sg_pass pass);
@@ -16764,6 +16765,16 @@ SOKOL_API_IMPL sg_image_info sg_query_image_info(sg_image img_id) {
         info.height = img->cmn.height;
     }
     return info;
+}
+
+SOKOL_API_IMPL void sg_generate_mips(sg_image img_id) {
+    const _sg_image_t* img = _sg_lookup_image(&_sg.pools, img_id.id);
+
+    SOKOL_ASSERT(img);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, img->gl.tex[img->cmn.active_slot]);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    _SG_GL_CHECK_ERROR();
 }
 
 SOKOL_API_IMPL sg_shader_info sg_query_shader_info(sg_shader shd_id) {

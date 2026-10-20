@@ -143,6 +143,7 @@ enum {
   MU_OPT_PREVENT_SCROLL = (1 << 19),
   MU_OPT_HIDE_ON_CLICK  = (1 << 20), // for popups
   MU_OPT_CONTAINHEIGHT  = (1 << 21), // for images
+  MU_OPT_ALWAYSONTOP = (1 << 22),
 };
 
 enum {
@@ -192,7 +193,7 @@ typedef struct { int type, size; } mu_BaseCommand;
 typedef struct { mu_BaseCommand base; void *dst; } mu_JumpCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; } mu_ClipCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; mu_Color color; } mu_RectCommand;
-typedef struct { mu_BaseCommand base; unsigned char shape; mu_Rect rect; mu_Color color; float scale; float params[9]; } mu_ShapeCommand;
+typedef struct { mu_BaseCommand base; unsigned char shape; mu_Rect rect; mu_Color color; float scale; float params[10]; } mu_ShapeCommand;
 typedef struct { mu_BaseCommand base; mu_Font font; mu_Vec2 pos; mu_Color color; float scale; char str[1]; } mu_TextCommand;
 typedef struct { mu_BaseCommand base; mu_Rect rect; int id; mu_Color color; float scale; } mu_IconCommand;
 typedef struct { mu_BaseCommand base; mu_Rect dest; mu_Image img; float opacity; float scale; } mu_ImageCommand;
@@ -230,7 +231,9 @@ typedef struct {
   mu_Vec2 content_size;
   mu_Vec2 scroll;
   int zindex;
+  int zorder;  // 0=normal, 1=always-on-top, 2=topmost (popups)
   int open;
+  int opt;
 } mu_Container;
 
 typedef struct {
@@ -635,6 +638,17 @@ void mu_end(mu_Context *ctx) {
   n = ctx->root_list.idx;
   qsort(ctx->root_list.items, n, sizeof(mu_Container*), compare_zindex);
 
+  for (int z = 1; z <= 2; z++) {
+    for (i = 0; i < n; i++) {
+      if (ctx->root_list.items[i]->zorder == z) {
+        ctx->root_list.items[i]->zindex = ++ctx->last_zindex;
+      }
+    }
+  }
+
+  // re-sort after adjustments
+  qsort(ctx->root_list.items, n, sizeof(mu_Container*), compare_zindex);
+
   /* set root container jump commands */
   for (i = 0; i < n; i++) {
     mu_Container *cnt = ctx->root_list.items[i];
@@ -787,7 +801,6 @@ mu_Container* mu_get_container(mu_Context *ctx, const char *name) {
 void mu_bring_to_front(mu_Context *ctx, mu_Container *cnt) {
   cnt->zindex = ++ctx->last_zindex;
 }
-
 
 /*============================================================================
 ** pool
@@ -2520,6 +2533,10 @@ int mu_begin_window_ex(mu_Context *ctx, const char *title, mu_Rect rect, int opt
   mu_Id id = mu_get_id(ctx, title, strlen(title));
   mu_Container *cnt = get_container(ctx, id, opt);
   if (!cnt || !cnt->open) { return 0; }
+  cnt->opt = opt;
+  if (cnt->zorder == 0)
+    cnt->zorder = (opt & MU_OPT_ALWAYSONTOP) ? 1 : 0;
+
   push(ctx->id_stack, id);
 
   if (cnt->rect.w == 0 || opt & MU_OPT_NODRAG) { cnt->rect = rect; }
@@ -2630,6 +2647,7 @@ void mu_open_popup(mu_Context *ctx, const char *name) {
   /* position at mouse cursor, open and bring-to-front */
   cnt->rect = mu_rect(ctx->mouse_pos.x, ctx->mouse_pos.y, 1, 1);
   cnt->open = 1;
+  cnt->zorder = 2;
   ctx->hover = 0;
   ctx->hover_type = 0;
   ctx->focus = 0;
@@ -2776,19 +2794,19 @@ if (gs_gui_combo_begin(gui, "#snaps", "Snap", 3)) {
 */
 
 int mu_begin_combo_ex(mu_Context* ctx, const char* id, const char* current_item, int32_t max_items, int32_t opt) {
-    int res = 0;
     opt = MU_OPT_NODRAG | MU_OPT_NORESIZE | MU_OPT_NOTITLE;
 
     if (mu_button(ctx, current_item)) {
         mu_open_popup(ctx, id);
     }
 
-    int ct = max_items > 0 ? max_items : 0;
-    // mu_Rect r = mu_layout_next(ctx);
     mu_Rect rect = ctx->last_rect;
     rect.y += rect.h;
-    // rect.h = ct ? (ct + 1) * ctx->styles[MU_ELEMENT_BUTTON][0x00].size[1] : rect.h;
-    rect.h = ct ? (ct + 1) * ctx->style->size.y : rect.h;
+    if (max_items > 0) {
+        rect.h = (max_items * (ctx->style->size.y + ctx->style->spacing))
+                 + (ctx->style->padding * 2)
+                 - ctx->style->spacing; // remove trailing spacing after last item
+    }
     return mu_begin_popup_ex(ctx, id, rect, opt);
 }
 
