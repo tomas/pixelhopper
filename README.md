@@ -26,17 +26,17 @@ Download an AppImage from the releases tab, or clone the repository and run `mak
 
 Now you can copy the pixelhopper binary to a location in your $PATH, like `/usr/local/bin`
 
-    sudo cp pixelhopper /usr/local/bin
+    sudo cp ph /usr/local/bin
 
 # Running
 
 Just run the command!
 
-    pixelhopper
+    ph
 
 # Copyright
 
-(c) 2023 - Tomás Pollak
+(c) Tomás Pollak
 
 # License
 
